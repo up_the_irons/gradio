@@ -18,9 +18,11 @@ from typing import List, Optional
 
 import typer
 from rich import print
+from uvicorn import Config
+from uvicorn.supervisors import ChangeReload
 
 import gradio
-from gradio import utils
+from gradio import networking, utils
 
 reload_thread = threading.local()
 
@@ -29,6 +31,7 @@ def _setup_config(
     demo_path: Path,
     demo_name: str = "demo",
     additional_watch_dirs: list[str] | None = None,
+    restart_server: bool = True,
 ):
     original_path = demo_path
     app_text = Path(original_path).read_text()
@@ -50,7 +53,14 @@ def _setup_config(
         )
 
     abs_original_path = utils.abspath(original_path)
-    filename = Path(original_path).stem
+    if restart_server:
+        path = os.path.normpath(original_path)
+        path = path.replace("/", ".")
+        path = path.replace("\\", ".")
+        filename = os.path.splitext(path)[0]
+        demo_name = f"{demo_name}.app"
+    else:
+        filename = Path(original_path).stem
 
     gradio_folder = Path(inspect.getfile(gradio)).parent
 
@@ -93,23 +103,46 @@ def _setup_config(
 
 
 def main(
-    demo_path: Path, demo_name: str = "demo", watch_dirs: Optional[List[str]] = None
+    demo_path: Path,
+    demo_name: str = "demo",
+    watch_dirs: Optional[List[str]] = None,
+    restart_server: bool = True,
 ):
     # default execution pattern to start the server and watch changes
     filename, path, watch_dirs, demo_name = _setup_config(
-        demo_path, demo_name, watch_dirs
+        demo_path, demo_name, watch_dirs, restart_server
     )
     # extra_args = args[1:] if len(args) == 1 or args[1].startswith("--") else args[2:]
-    popen = subprocess.Popen(
-        [sys.executable, "-u", path],
-        env=dict(
-            os.environ,
-            GRADIO_WATCH_DIRS=",".join(watch_dirs),
-            GRADIO_WATCH_FILE=filename,
-            GRADIO_WATCH_DEMO_NAME=demo_name,
-        ),
-    )
-    popen.wait()
+    if restart_server:
+        port = networking.get_first_available_port(
+            networking.INITIAL_PORT_VALUE,
+            networking.INITIAL_PORT_VALUE + networking.TRY_NUM_PORTS,
+        )
+        gradio_app = f"{filename}:{demo_name}"
+        cfg = Config(
+            gradio_app,
+            reload=True,
+            port=port,
+            log_level="warning",
+            reload_dirs=watch_dirs,
+        )
+        server = networking.Server(cfg)
+        sock = cfg.bind_socket()
+        print(
+            f"Launching in [bold][magenta]reload mode[/][/] on: http://{networking.LOCALHOST_NAME}:{port} (Press CTRL+C to quit)\n"
+        )
+        ChangeReload(cfg, target=server.run, sockets=[sock]).run()
+    else:
+        popen = subprocess.Popen(
+            [sys.executable, "-u", path],
+            env=dict(
+                os.environ,
+                GRADIO_WATCH_DIRS=",".join(watch_dirs),
+                GRADIO_WATCH_FILE=filename,
+                GRADIO_WATCH_DEMO_NAME=demo_name,
+            ),
+        )
+        popen.wait()
 
 
 if __name__ == "__main__":

@@ -34,7 +34,9 @@ class TestReload:
     def config(self, monkeypatch, argv) -> Config:
         monkeypatch.setattr("sys.argv", ["gradio"] + argv)
         name = argv[1].replace("--demo-name", "").strip() if len(argv) > 1 else "demo"
-        return Config(*_setup_config(argv[0], name))
+        restart = argv[2].startswith("--restart") if len(argv) > 2 else False
+        cfg = Config(*_setup_config(argv[0], name, restart_server=restart))
+        cfg.restart_server = restart  # type: ignore
 
     @pytest.fixture(params=[{}])
     def reloader(self, config):
@@ -46,10 +48,20 @@ class TestReload:
     def test_config_default_app(self, config):
         assert config.filename == "run"
 
-    @pytest.mark.parametrize("argv", [["demo/calculator/run.py", "--demo-name test"]])
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["demo/calculator/run.py", "--demo-name test", "--no-restart-server"],
+            ["demo/calculator/run.py", "--demo-name test", "--restart-server"],
+        ],
+    )
     def test_config_custom_app(self, config):
-        assert config.filename == "run"
-        assert config.demo_name == "test"
+        if config.restart_server:
+            assert config.filename == "demo.calculator.run"
+            assert config.demo_name == "test.app"
+        else:
+            assert config.filename == "run"
+            assert config.demo_name == "test"
 
     def test_config_watch_gradio(self, config):
         gradio_dir = str(Path(gradio.__file__).parent)

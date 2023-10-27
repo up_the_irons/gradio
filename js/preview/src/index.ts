@@ -52,7 +52,7 @@ async function run(): Promise<void> {
 
 		const _process = spawn(
 			which.sync("gradio"),
-			[parsed_args.app, "--watch-dirs", options.component_dir],
+			[parsed_args.app, "--watch-dirs", options.component_dir, "--no-restart-server"],
 			{
 				shell: true,
 				stdio: "pipe",
